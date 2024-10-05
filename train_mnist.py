@@ -13,6 +13,7 @@ batch_size = 128
 learning_rate = 0.001
 num_epochs = 10
 eps = 0.001
+condition = True
 
 
 transform = transforms.Compose(
@@ -29,6 +30,7 @@ model = Unet(
     dim=32,
     channels=1,
     dim_mults=(1, 2, 4),
+    condition=condition,
 )
 model.to(device)
 
@@ -37,6 +39,7 @@ optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
 def euler_sampler(model, shape, sample_N):
     model.eval()
+    cond = torch.arange(10).repeat(shape[0] // 10).to(device) if condition else None
     with torch.no_grad():
         z0 = torch.randn(shape, device=device)
         x = z0.detach().clone()
@@ -45,7 +48,7 @@ def euler_sampler(model, shape, sample_N):
         for i in range(sample_N):
             num_t = i / sample_N * (1 - eps) + eps
             t = torch.ones(shape[0], device=device) * num_t
-            pred = model(x, t * 999)
+            pred = model(x, t * 999, cond)
 
             x = x.detach().clone() + pred * dt
 
@@ -65,6 +68,7 @@ def rk45_sampler(model, shape):
 
     rtol = atol = 1e-05
     model.eval()
+    cond = torch.arange(10).repeat(shape[0] // 10).to(device) if condition else None
     with torch.no_grad():
         z0 = torch.randn(shape, device=device)
         x = z0.detach().clone()
@@ -72,7 +76,7 @@ def rk45_sampler(model, shape):
         def ode_func(t, x):
             x = from_flattened_numpy(x, shape).to(device).type(torch.float32)
             vec_t = torch.ones(shape[0], device=x.device) * t
-            drift = model(x, vec_t * 999)
+            drift = model(x, vec_t * 999, cond)
 
             return to_flattened_numpy(drift)
 
@@ -107,7 +111,7 @@ def save_img_grid(img, filename):
 for epoch in range(num_epochs):
     total_loss = 0
     model.train()
-    for batch, _ in dataloader:
+    for batch, cond in dataloader:
         batch = batch.to(device)
 
         optimizer.zero_grad()
@@ -121,7 +125,7 @@ for epoch in range(num_epochs):
         perturbed_data = t_expand * batch + (1 - t_expand) * z0
         target = batch - z0
 
-        score = model(perturbed_data, t * 999)
+        score = model(perturbed_data, t * 999, cond.to(device) if condition else None)
 
         losses = torch.square(score - target)
         losses = torch.mean(losses.reshape(losses.shape[0], -1), dim=-1)
@@ -136,13 +140,13 @@ for epoch in range(num_epochs):
     print(f"Epoch {epoch + 1}, Loss: {total_loss / len(dataloader)}")
 
     images, nfe = euler_sampler(model, shape=(100, 1, 28, 28), sample_N=1)
-    save_img_grid(images, f"euler_epoch_{epoch + 1}_nfe_{nfe}.png")
+    save_img_grid(images, f"output/euler_epoch_{epoch + 1}_nfe_{nfe}.png")
 
     images, nfe = euler_sampler(model, shape=(100, 1, 28, 28), sample_N=2)
-    save_img_grid(images, f"euler_epoch_{epoch + 1}_nfe_{nfe}.png")
+    save_img_grid(images, f"output/euler_epoch_{epoch + 1}_nfe_{nfe}.png")
 
     images, nfe = euler_sampler(model, shape=(100, 1, 28, 28), sample_N=10)
-    save_img_grid(images, f"euler_epoch_{epoch + 1}_nfe_{nfe}.png")
+    save_img_grid(images, f"output/euler_epoch_{epoch + 1}_nfe_{nfe}.png")
 
     images, nfe = rk45_sampler(model, shape=(100, 1, 28, 28))
-    save_img_grid(images, f"rk45_epoch_{epoch + 1}_nfe_{nfe}.png")
+    save_img_grid(images, f"output/rk45_epoch_{epoch + 1}_nfe_{nfe}.png")

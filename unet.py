@@ -159,15 +159,15 @@ class Unet(nn.Module):
         dim,
         dim_mults=(1, 2, 4, 8),
         channels=3,
-        self_condition=False,
         resnet_block_groups=4,
+        condition=False,
     ):
         super().__init__()
 
         # determine dimensions
         self.channels = channels
-        self.self_condition = self_condition
-        input_channels = channels * (2 if self_condition else 1)
+        self.condition = condition
+        input_channels = channels
 
         init_dim = dim
         self.init_conv = nn.Conv2d(
@@ -188,6 +188,14 @@ class Unet(nn.Module):
             nn.GELU(),
             nn.Linear(time_dim, time_dim),
         )
+
+        if self.condition:
+            self.cond_mlp = nn.Sequential(
+                nn.Embedding(10, time_dim),
+                nn.Linear(time_dim, time_dim),
+                nn.GELU(),
+                nn.Linear(time_dim, time_dim),
+            )
 
         # layers
         self.downs = nn.ModuleList([])
@@ -240,11 +248,13 @@ class Unet(nn.Module):
         self.final_res_block = block_klass(dim * 2, dim, time_emb_dim=time_dim)
         self.final_conv = nn.Conv2d(dim, self.out_dim, 1)
 
-    def forward(self, x, time):
+    def forward(self, x, time, cond=None):
         x = self.init_conv(x)
         r = x.clone()
 
         t = self.time_mlp(time)
+        if self.condition:
+            t += self.cond_mlp(cond)
 
         h = []
 
